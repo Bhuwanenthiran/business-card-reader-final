@@ -1,0 +1,8 @@
+# Dependency directories
+node_modules/
+
+# Local environment variables
+.env
+
+# OAuth token response (contains secrets)
+token-response.json
