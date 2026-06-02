@@ -1,6 +1,7 @@
 import { addActionToQueue, getQueue, removeActionFromQueue, updateQueueItem, saveContactToDB, getContactsFromDB } from '../storage/db';
 import { createZohoLead } from '../services/zohoApi';
 import { searchZohoDuplicate } from '../services/zohoSearchService';
+import { sendEmail } from '../services/emailService';
 
 const MAX_RETRIES = 3;
 
@@ -60,6 +61,19 @@ export const enqueueAction = async (actionType, payload) => {
       };
       await addActionToQueue(queueItem);
       console.log('✓ SYNC_ZOHO Queued', queueItem);
+    } else if (actionType === 'SEND_EMAIL') {
+      const queueItem = {
+        type: 'SEND_EMAIL',
+        createdAt: new Date().toISOString(),
+        contactId: payload.contactId,
+        email: payload.email || '',
+        subject: payload.subject || '',
+        message: payload.message || '',
+        status: 'pending',
+        retryCount: 0
+      };
+      await addActionToQueue(queueItem);
+      console.log('✓ SEND_EMAIL Queued', queueItem);
     } else {
       await addActionToQueue({ type: actionType, payload });
     }
@@ -99,8 +113,8 @@ export const processQueue = async (onQueueProcessed, onSyncResult) => {
       for (const item of pendingItems) {
         processedIds.add(item.id);
         
-        // For SYNC_ZOHO: skip items that are completed, failed (max retries), or deleted
-        if (item.type === 'SYNC_ZOHO') {
+        // For SYNC_ZOHO & SEND_EMAIL: skip items that are completed, failed (max retries), or deleted
+        if (item.type === 'SYNC_ZOHO' || item.type === 'SEND_EMAIL') {
           if (item.status === 'completed') {
             continue;
           }
@@ -117,6 +131,26 @@ export const processQueue = async (onQueueProcessed, onSyncResult) => {
           // If the contact was deleted, remove it from queue
           await removeActionFromQueue(item.id);
           continue;
+        }
+
+        // Check workflow dependencies: Email & WhatsApp need Zoho CRM sync success first.
+        if (type === 'SEND_EMAIL' || type === 'SEND_WHATSAPP') {
+          if (contact.zohoStatus !== 'synced') {
+            console.log(`[Queue] Skipping ${type} for contact ${contactId} because Zoho CRM sync is not completed (status: ${contact.zohoStatus})`);
+            
+            // If Zoho sync failed, fail this action too and remove from queue
+            if (contact.zohoStatus === 'failed') {
+              if (type === 'SEND_EMAIL') {
+                contact = { ...contact, emailStatus: 'failed' };
+              } else {
+                contact = { ...contact, whatsappStatus: 'failed' };
+              }
+              contactsMap.set(contact.id, contact);
+              await saveContactToDB(contact);
+              await removeActionFromQueue(item.id);
+            }
+            continue;
+          }
         }
 
         try {
@@ -136,7 +170,11 @@ export const processQueue = async (onQueueProcessed, onSyncResult) => {
             contactsMap.set(contact.id, contact);
             await saveContactToDB(contact);
 
-            await simulateSendEmail(contact);
+            const msg = item.message || item.payload?.message || contact.emailMessage;
+            const emailRes = await sendEmail(contact, msg);
+            if (!emailRes.success) {
+              throw new Error(emailRes.error || 'EmailJS sending failed');
+            }
             
             contact = { ...contact, emailStatus: 'sent' };
             contactsMap.set(contact.id, contact);
@@ -220,8 +258,19 @@ export const processQueue = async (onQueueProcessed, onSyncResult) => {
             contact = { ...contact, whatsappStatus: 'failed' };
           } else if (type === 'SEND_EMAIL') {
             contact = { ...contact, emailStatus: 'failed' };
+
+            // Increment retry count
+            const newRetryCount = (item.retryCount || 0) + 1;
+            item.retryCount = newRetryCount;
+            item.status = newRetryCount >= MAX_RETRIES ? 'failed' : 'pending';
+            await updateQueueItem(item);
           } else if (type === 'SYNC_ZOHO') {
-            contact = { ...contact, zohoStatus: 'failed' };
+            contact = { 
+              ...contact, 
+              zohoStatus: 'failed',
+              emailStatus: 'failed',
+              whatsappStatus: 'failed'
+            };
             
             // Increment retry count
             const newRetryCount = (item.retryCount || 0) + 1;
@@ -229,6 +278,15 @@ export const processQueue = async (onQueueProcessed, onSyncResult) => {
             item.status = newRetryCount >= MAX_RETRIES ? 'failed' : 'pending';
             await updateQueueItem(item);
             
+            // Immediately fail and remove any downstream queue items for this contact
+            for (const qItem of queue) {
+              const qContactId = qItem.contactId || qItem.payload?.contactId;
+              if (qContactId === contactId && qItem.type !== 'SYNC_ZOHO') {
+                await removeActionFromQueue(qItem.id);
+                processedIds.add(qItem.id);
+              }
+            }
+
             if (onSyncResult) {
               onSyncResult(contact, 'failed');
             }

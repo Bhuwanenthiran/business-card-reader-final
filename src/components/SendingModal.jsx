@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createZohoLead } from '../services/zohoApi';
+import { sendEmail } from '../services/emailService';
 
 export default function SendingModal({ contact, isOffline, onComplete }) {
   const [waProgress, setWaProgress] = useState(0);
@@ -14,103 +15,93 @@ export default function SendingModal({ contact, isOffline, onComplete }) {
   const [allDone, setAllDone] = useState(false);
 
   useEffect(() => {
-    const waInterval = setInterval(() => {
-      setWaProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(waInterval);
-          setWaStatus(isOffline ? 'queued' : 'sent');
-          return 100;
-        }
-        return prev + 5;
-      });
-    }, 60);
+    let active = true;
 
-    const emailInterval = setInterval(() => {
-      setEmailProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(emailInterval);
-          setEmailStatus(isOffline ? 'queued' : 'sent');
-          return 100;
-        }
-        return prev + 3;
-      });
-    }, 70);
-
-    return () => {
-      clearInterval(waInterval);
-      clearInterval(emailInterval);
-    };
-  }, [isOffline]);
-
-  // Zoho Sync logic: Call real API if online, queue if offline
-  useEffect(() => {
-    if (isOffline) {
-      const zohoInterval = setInterval(() => {
-        setZohoProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(zohoInterval);
-            setZohoStatus('queued');
-            return 100;
-          }
-          return prev + 4;
-        });
-      }, 80);
-      return () => clearInterval(zohoInterval);
-    } else {
-      let apiDone = false;
-      let apiSuccess = false;
-      let leadId = null;
-
-      // Animate progress up to 90% while waiting for the real API response
-      const zohoInterval = setInterval(() => {
-        setZohoProgress(prev => {
-          if (apiDone) {
-            clearInterval(zohoInterval);
-            if (apiSuccess) {
-              setZohoStatus('synced');
-              setZohoLeadId(leadId);
-            } else {
-              setZohoStatus('failed');
-            }
-            return 100;
-          }
-          if (prev >= 90) {
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 100);
-
-      // Perform real Zoho Lead creation
-      if (contact && contact.zohoLeadId) {
-        console.log('✓ Zoho Lead ID already exists, skipping API call');
-        apiSuccess = true;
-        leadId = contact.zohoLeadId;
-        apiDone = true;
-      } else {
-        createZohoLead(contact)
-          .then((res) => {
-            apiSuccess = true;
-            leadId = res.zohoLeadId;
-            apiDone = true;
-          })
-          .catch((err) => {
-            console.error('[SendingModal] Zoho API sync error:', err);
-            apiSuccess = false;
-            apiDone = true;
-          });
+    const runWorkflows = async () => {
+      if (isOffline) {
+        setWaProgress(100);
+        setWaStatus('queued');
+        setEmailProgress(100);
+        setEmailStatus('queued');
+        setZohoProgress(100);
+        setZohoStatus('queued');
+        setAllDone(true);
+        return;
       }
 
-      return () => clearInterval(zohoInterval);
-    }
-  }, [isOffline, contact]);
+      // Online: Run real Zoho CRM sync first
+      setZohoProgress(10);
+      let zohoInterval;
+      try {
+        let leadId = null;
+        if (contact && contact.zohoLeadId) {
+          console.log('✓ Zoho Lead ID already exists, skipping API call');
+          leadId = contact.zohoLeadId;
+        } else {
+          zohoInterval = setInterval(() => {
+            setZohoProgress(prev => Math.min(prev + 10, 90));
+          }, 100);
+          
+          const res = await createZohoLead(contact);
+          clearInterval(zohoInterval);
+          leadId = res.zohoLeadId;
+        }
 
-  useEffect(() => {
-    if (waProgress === 100 && emailProgress === 100 && zohoProgress === 100) {
-      const timer = setTimeout(() => setAllDone(true), 600);
-      return () => clearTimeout(timer);
-    }
-  }, [waProgress, emailProgress, zohoProgress]);
+        if (!active) return;
+        setZohoProgress(100);
+        setZohoStatus('synced');
+        setZohoLeadId(leadId);
+
+        // Next: EmailJS send
+        setEmailProgress(10);
+        const emailProgressInterval = setInterval(() => {
+          setEmailProgress(prev => Math.min(prev + 10, 90));
+        }, 100);
+
+        const emailResult = await sendEmail(contact, contact.emailMessage);
+        clearInterval(emailProgressInterval);
+
+        if (!active) return;
+        setEmailProgress(100);
+        if (emailResult.success) {
+          setEmailStatus('sent');
+        } else {
+          setEmailStatus('failed');
+        }
+
+        // WhatsApp simulation
+        setWaProgress(10);
+        const waProgressInterval = setInterval(() => {
+          setWaProgress(prev => Math.min(prev + 15, 90));
+        }, 100);
+        await new Promise(r => setTimeout(r, 600));
+        clearInterval(waProgressInterval);
+
+        if (!active) return;
+        setWaProgress(100);
+        setWaStatus('sent');
+        setAllDone(true);
+
+      } catch (err) {
+        console.error('Workflow failed at Zoho CRM Sync:', err);
+        if (zohoInterval) clearInterval(zohoInterval);
+        if (!active) return;
+        setZohoProgress(100);
+        setZohoStatus('failed');
+        setEmailProgress(0);
+        setEmailStatus('failed');
+        setWaProgress(0);
+        setWaStatus('failed');
+        setAllDone(true);
+      }
+    };
+
+    runWorkflows();
+
+    return () => {
+      active = false;
+    };
+  }, [isOffline, contact]);
 
   const StatusRow = ({ label, icon, color, progress, status }) => {
     const isSending = status === 'sending';

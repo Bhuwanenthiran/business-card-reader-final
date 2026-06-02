@@ -8,6 +8,7 @@ import ScanScreen from './components/ScanScreen';
 import ReviewScreen from './components/ReviewScreen';
 import ContactsScreen from './components/ContactsScreen';
 import TemplatesScreen from './components/TemplatesScreen';
+import { useTemplates } from './context/TemplateContext';
 import SendingModal from './components/SendingModal';
 
 import { initDB, getContactsFromDB, saveContactToDB, deleteContactFromDB, getQueue } from './storage/db';
@@ -37,6 +38,7 @@ function App() {
   const [isCheckingZoho, setIsCheckingZoho] = useState(false);
 
   const addToast = useToast();
+  const { emailSubject, fillTemplate } = useTemplates();
 
   const updateQueueCount = async () => {
     const q = await getQueue();
@@ -64,7 +66,7 @@ function App() {
     } else if (status === 'duplicate') {
       addToast('Existing Zoho lead detected', 'info');
     } else if (status === 'failed') {
-      addToast('Failed to sync contact', 'error');
+      addToast('Zoho CRM sync failed.', 'error');
     }
   };
 
@@ -369,7 +371,12 @@ function App() {
         await enqueueAction('SEND_WHATSAPP', { contactId: finalContact.id });
       }
       if (emailStatus === 'queued') {
-        await enqueueAction('SEND_EMAIL', { contactId: finalContact.id });
+        await enqueueAction('SEND_EMAIL', {
+          contactId: finalContact.id,
+          email: finalContact.email,
+          subject: fillTemplate(emailSubject, finalContact),
+          message: finalContact.emailMessage
+        });
       }
       if (zohoStatus === 'queued') {
         console.log('✓ Contact Saved Offline');
@@ -379,15 +386,18 @@ function App() {
       await updateQueueCount();
 
       // Toast feedback based on sync outcome
-      if (zohoStatus === 'synced') {
-        addToast('Contact saved successfully', 'success');
-        addToast('Lead synced to Zoho CRM', 'success');
+      if (zohoStatus === 'failed') {
+        addToast('Zoho CRM sync failed.', 'error');
+      } else if (zohoStatus === 'synced') {
+        if (emailStatus === 'failed') {
+          addToast('Contact saved. Email delivery failed.', 'error');
+        } else {
+          addToast('Contact saved successfully', 'success');
+          addToast('Lead synced to Zoho CRM', 'success');
+        }
       } else if (zohoStatus === 'queued') {
         addToast('Contact saved successfully (offline)', 'success');
         addToast('Lead sync queued (offline)', 'info');
-      } else if (zohoStatus === 'failed') {
-        addToast('Contact saved successfully', 'success');
-        addToast('Zoho CRM sync failed', 'error');
       } else {
         addToast('Contact saved successfully', 'success');
       }
@@ -424,14 +434,19 @@ function App() {
     
     addToast('Retrying dispatch...', 'info');
     
-    if (contact.whatsappStatus === 'failed' || contact.whatsappStatus === 'queued') {
-      await enqueueAction('SEND_WHATSAPP', { contactId: contact.id });
-    }
-    if (contact.emailStatus === 'failed' || contact.emailStatus === 'queued') {
-      await enqueueAction('SEND_EMAIL', { contactId: contact.id });
-    }
     if (contact.zohoStatus === 'failed' || contact.zohoStatus === 'queued') {
       await enqueueAction('SYNC_ZOHO', { contactId: contact.id, contactData: contact });
+    }
+    if (contact.emailStatus === 'failed' || contact.emailStatus === 'queued') {
+      await enqueueAction('SEND_EMAIL', {
+        contactId: contact.id,
+        email: contact.email,
+        subject: fillTemplate(emailSubject, contact),
+        message: contact.emailMessage
+      });
+    }
+    if (contact.whatsappStatus === 'failed' || contact.whatsappStatus === 'queued') {
+      await enqueueAction('SEND_WHATSAPP', { contactId: contact.id });
     }
     
     setIsSyncing(true);

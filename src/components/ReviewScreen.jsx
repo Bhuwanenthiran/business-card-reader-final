@@ -37,6 +37,21 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
     phone: '', altPhone: '', 
     ...scannedData,
   });
+  const generateEmailTemplate = (name) => {
+    return `Hi ${name || ''},
+
+Thank you for connecting with us.
+
+Your contact has been successfully added to our CRM system.
+
+We look forward to staying in touch.
+
+Regards,
+Business Card Scanner Team`;
+  };
+
+  const [emailMessage, setEmailMessage] = useState(() => generateEmailTemplate(scannedData?.name));
+  const [userEditedEmail, setUserEditedEmail] = useState(false);
   const [showPicker, setShowPicker] = useState(() => {
     const hasMultiple = (scannedData?.phones?.length > 1) || (scannedData?.emails?.length > 1);
     return hasMultiple;
@@ -47,6 +62,16 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
   const addToast = useToast();
   const { waTemplate, emailSubject, emailBody, fillTemplate } = useTemplates();
 
+  const handleFieldChange = (key, value) => {
+    setForm(prev => {
+      const updated = { ...prev, [key]: value };
+      if (key === 'name' && !userEditedEmail) {
+        setEmailMessage(generateEmailTemplate(value));
+      }
+      return updated;
+    });
+  };
+
   const handlePickerConfirm = ({ selectedPhone, selectedEmail }) => {
     const allPhones = form.phones || [];
     const allEmails = form.emails || [];
@@ -55,13 +80,19 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
     const altPhone = allPhones.find(p => p !== selectedPhone) || '';
     const altEmail = allEmails.find(e => e !== selectedEmail) || '';
 
-    setForm(prev => ({
-      ...prev,
-      phone: selectedPhone,
-      email: selectedEmail,
-      altPhone,
-      altEmail
-    }));
+    setForm(prev => {
+      const updated = {
+        ...prev,
+        phone: selectedPhone,
+        email: selectedEmail,
+        altPhone,
+        altEmail
+      };
+      if (!userEditedEmail) {
+        setEmailMessage(generateEmailTemplate(updated.name));
+      }
+      return updated;
+    });
     
     console.log('[Debug] Contact Selection Confirmed:', { selectedPhone, selectedEmail, altPhone, altEmail });
     setShowPicker(false);
@@ -79,7 +110,7 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
       setTimeout(() => setErrors({}), 500); // Clear shake animation
       return;
     }
-    onSave(form);
+    onSave({ ...form, emailMessage });
   };
 
   return (
@@ -138,7 +169,7 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
                 <input
                   className="form-input"
                   value={form[f.key] || ''}
-                  onChange={e => setForm({...form, [f.key]: e.target.value})}
+                  onChange={e => handleFieldChange(f.key, e.target.value)}
                   placeholder=" "
                   style={{
                     borderColor: errors[f.key] ? 'var(--danger)' : '',
@@ -179,6 +210,36 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
         })}
       </div>
 
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="material-icons" style={{ color: 'var(--primary)', fontSize: 20 }}>email</span>
+          Follow-up Email Message
+        </h3>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              className="form-input"
+              value={emailMessage}
+              onChange={e => {
+                setEmailMessage(e.target.value);
+                setUserEditedEmail(true);
+              }}
+              placeholder=" "
+              style={{
+                height: 'auto',
+                paddingTop: 12,
+                paddingBottom: 12,
+                resize: 'vertical',
+                minHeight: '150px',
+                fontFamily: 'inherit',
+                lineHeight: '1.5'
+              }}
+            />
+            <label className="form-label">Email Message</label>
+          </div>
+        </div>
+      </div>
+
       <div className="card" style={{ padding: 0, marginBottom: 24, overflow: 'hidden' }}>
         <button onClick={() => setPreviewOpen(!previewOpen)} style={{ width: '100%', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -202,7 +263,7 @@ export default function ReviewScreen({ scannedData, previewUrl, onSave, onDiscar
                 <div className="email-preview-header">
                   <strong>Subject:</strong> {fillTemplate(emailSubject, form)}
                 </div>
-                <div className="email-preview-body">{fillTemplate(emailBody, form)}</div>
+                 <div className="email-preview-body" style={{ whiteSpace: 'pre-wrap' }}>{emailMessage}</div>
               </div>
             )}
           </div>
