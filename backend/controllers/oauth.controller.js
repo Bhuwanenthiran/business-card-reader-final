@@ -52,7 +52,7 @@ export const handleOAuthCallback = async (req, res) => {
     logger.info('Token exchange request started → Zoho OAuth server...');
 
     // ── Exchange authorization code for tokens ──
-    const response = await axios.post('https://accounts.zoho.in/oauth/v2/token', null, {
+    const response = await axios.post(`https://accounts.zoho.${config.ZOHO_DOMAIN}/oauth/v2/token`, null, {
       params: {
         grant_type: 'authorization_code',
         client_id: config.CLIENT_ID,

@@ -59,9 +59,8 @@ class TokenService {
 
       throw new Error(`Cannot refresh Zoho access token. Missing configuration: ${missing.join(', ')}`);
     }
-
     try {
-      const response = await axios.post('https://accounts.zoho.in/oauth/v2/token', null, {
+      const response = await axios.post(`https://accounts.zoho.${config.ZOHO_DOMAIN}/oauth/v2/token`, null, {
         params: {
           grant_type: 'refresh_token',
           client_id: CLIENT_ID,

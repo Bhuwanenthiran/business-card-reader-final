@@ -1,5 +1,6 @@
 import { getAccessToken } from './token.service.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/env.js';
 import axios from 'axios';
 
 /**
@@ -31,10 +32,10 @@ class ZohoService {
       throw new Error('At least email or phone must be provided to search leads.');
     }
 
-    logger.info(`Sending search request to Zoho CRM API → https://www.zohoapis.in/crm/v7/Leads/search?criteria=${criteria}`);
+    logger.info(`Sending search request to Zoho CRM API → https://www.zohoapis.${config.ZOHO_DOMAIN}/crm/v7/Leads/search?criteria=${criteria}`);
 
     try {
-      const response = await axios.get('https://www.zohoapis.in/crm/v7/Leads/search', {
+      const response = await axios.get(`https://www.zohoapis.${config.ZOHO_DOMAIN}/crm/v7/Leads/search`, {
         headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
         params: { criteria }
       });
@@ -72,8 +73,8 @@ class ZohoService {
     const accessToken = await getAccessToken();
     logger.info('✓ Access Token Retrieved');
 
-    logger.info('Sending lead creation request to Zoho CRM API → https://www.zohoapis.in/crm/v7/Leads');
-    const response = await axios.post('https://www.zohoapis.in/crm/v7/Leads', {
+    logger.info(`Sending lead creation request to Zoho CRM API → https://www.zohoapis.${config.ZOHO_DOMAIN}/crm/v7/Leads`);
+    const response = await axios.post(`https://www.zohoapis.${config.ZOHO_DOMAIN}/crm/v7/Leads`, {
       data: [ leadData ]
     }, {
       headers: { 

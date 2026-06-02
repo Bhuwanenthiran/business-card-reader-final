@@ -14,6 +14,7 @@ export const config = {
   CLIENT_SECRET: process.env.CLIENT_SECRET || '',
   REFRESH_TOKEN: process.env.REFRESH_TOKEN || '',
   REDIRECT_URI: process.env.REDIRECT_URI || 'http://localhost:3000/oauth/callback',
+  ZOHO_DOMAIN: process.env.ZOHO_DOMAIN || 'in',
   NODE_ENV: process.env.NODE_ENV || 'development'
 };
 
